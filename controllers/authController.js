@@ -35,9 +35,10 @@ exports.register = async (req, res, next) => {
     // 5. Set cookie (HTTP-only, secure in production)
     res.cookie('jwt', token, {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000
+  secure: true, // Must be true for HTTPS (Render uses HTTPS)
+  sameSite: 'none', // Required for cross-origin cookies
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/' // Make cookie available everywhere
 });
 
     // 6. Send response (exclude password)

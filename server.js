@@ -19,10 +19,11 @@ const app = express();
 // 🔒 Security middleware
 app.use(helmet()); // Set security headers
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://your-netlify-url.netlify.app'],
+  origin: ['http://localhost:5173', 'https://your-future-netlify-url.netlify.app'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['set-cookie'] // Important: expose the cookie header
 }));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
