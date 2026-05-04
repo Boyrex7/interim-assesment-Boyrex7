@@ -1,4 +1,6 @@
 require('dotenv').config();
+const cron = require('node-cron');
+const { fetchAndUpdatePrices } = require('./services/coinGeckoService');
 const express = require('express');
 const mongoose = require('mongoose');
 const cookieParser = require('cookie-parser');
@@ -17,26 +19,35 @@ const ApiError = require('./utils/apiError');
 const app = express();
 
 // 🔒 Security middleware
-app.use(helmet()); // Set security headers
+app.use(helmet());
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://your-future-netlify-url.netlify.app'],
+  origin: ['http://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['set-cookie'] // Important: expose the cookie header
+  exposedHeaders: ['set-cookie']
 }));
 app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100
 }));
 
 // 📦 Body parsing middleware
-app.use(express.json({ limit: '10kb' })); // Parse JSON bodies
+app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
-app.use(cookieParser()); // Parse cookies
+app.use(cookieParser());
 
 // 🗄️ Connect to MongoDB
 connectDB();
+
+// 🔄 LIVE PRICE UPDATES: Fetch on startup + every 60 seconds
+console.log('⏰ Initializing live price updates...');
+fetchAndUpdatePrices(); // Run immediately on startup
+
+cron.schedule('*/60 * * * *', () => {
+  console.log('⏰ Running scheduled price update...');
+  fetchAndUpdatePrices();
+});
 
 // 🛣️ Mount routes
 app.use('/api/auth', authRoutes);
@@ -57,12 +68,10 @@ app.use((err, req, res, next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
-  // Log error in development
   if (process.env.NODE_ENV === 'development') {
     console.error('❌ Error:', err);
   }
 
-  // Send response
   res.status(err.statusCode).json({
     status: err.status,
     message: err.message || 'Internal server error'
