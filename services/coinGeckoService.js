@@ -3,7 +3,6 @@ const Crypto = require('../models/Crypto');
 
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 
-// Map our symbols to CoinGecko IDs
 const coinGeckoIds = {
   BTC: 'bitcoin',
   ETH: 'ethereum',
@@ -22,6 +21,7 @@ async function fetchAndUpdatePrices() {
     console.log('🔄 Fetching live prices from CoinGecko...');
     
     const ids = Object.values(coinGeckoIds).join(',');
+    
     const response = await axios.get(`${COINGECKO_API}/coins/markets`, {
       params: {
         vs_currency: 'usd',
@@ -29,14 +29,17 @@ async function fetchAndUpdatePrices() {
         order: 'market_cap_desc',
         per_page: 100,
         page: 1,
-        sparkline: true
+        sparkline: false // Remove sparkline to reduce payload
+      },
+      headers: {
+        'Accept': 'application/json'
       }
     });
 
     const coins = response.data;
+    console.log(`📊 Received ${coins.length} coins from CoinGecko`);
     
     for (const coin of coins) {
-      // Find our symbol from the CoinGecko ID
       const symbol = Object.keys(coinGeckoIds).find(
         key => coinGeckoIds[key] === coin.id
       );
@@ -48,10 +51,10 @@ async function fetchAndUpdatePrices() {
             name: coin.name,
             symbol: symbol.toUpperCase(),
             price: coin.current_price,
-            change24h: coin.price_change_percentage_24h,
-            marketCap: coin.market_cap,
-            volume24h: coin.total_volume,
-            image: coin.image
+            change24h: coin.price_change_percentage_24h || 0,
+            marketCap: coin.market_cap || 0,
+            volume24h: coin.total_volume || 0,
+            image: coin.image || ''
           },
           { upsert: true, new: true }
         );
@@ -60,7 +63,12 @@ async function fetchAndUpdatePrices() {
 
     console.log(`✅ Updated ${coins.length} coins with live prices!`);
   } catch (error) {
-    console.error('❌ Error fetching prices:', error.message);
+    if (error.response && error.response.status === 429) {
+      console.warn('⚠️  CoinGecko rate limit hit. Waiting before retry...');
+      // Don't throw, just wait for next cron job
+    } else {
+      console.error('❌ Error fetching prices:', error.message);
+    }
   }
 }
 
