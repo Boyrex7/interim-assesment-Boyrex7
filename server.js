@@ -24,30 +24,13 @@ app.set('trust proxy', true);
 // 🔒 Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: ['http://localhost:5173'],
+  origin: ['http://localhost:5173', 'https://coinbaseboyrex7.netlify.app', 'https://*.netlify.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['set-cookie']
 }));
 
-// 🔒 Security middleware
-app.use(helmet());
-app.use(cors({
-  origin: [
-    'http://localhost:5173', 
-    'https://coinbaseboyrex7.netlify.app',  // 👈 Your new Netlify URL
-    'https://your-future-netlify-url.netlify.app' // Optional: for future deploys
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['set-cookie']
-}));
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100
-}));
 
 // 📦 Body parsing middleware
 app.use(express.json({ limit: '10kb' }));
