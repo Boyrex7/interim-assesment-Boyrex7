@@ -5,7 +5,7 @@ const {
   getNewListings, 
   createCrypto 
 } = require('../controllers/cryptoController');
-const { manualUpdate } = require('../controllers/priceController');
+const { manualUpdate } = require('../controllers/priceControllers');
 
 const router = express.Router();
 
