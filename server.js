@@ -34,7 +34,11 @@ app.use(cors({
 // 🔒 Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: ['http://localhost:5173'],
+  origin: [
+    'http://localhost:5173', 
+    'https://coinbaseboyrex7.netlify.app',  // 👈 Your new Netlify URL
+    'https://your-future-netlify-url.netlify.app' // Optional: for future deploys
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -57,11 +61,10 @@ connectDB();
 console.log('⏰ Initializing live price updates...');
 fetchAndUpdatePrices(); // Run immediately on startup
 
-cron.schedule('*/60 * * * *', () => {
+cron.schedule('*/3 * * * *', () => {
   console.log('⏰ Running scheduled price update...');
   fetchAndUpdatePrices();
 });
-
 // 🛣️ Mount routes
 app.use('/api/auth', authRoutes);
 app.use('/api/crypto', cryptoRoutes);
