@@ -1,73 +1,80 @@
-const Crypto = require('../models/Crypto');
-const ApiError = require('../utils/apiError');
+import Crypto from "../models/Crypto.js";
+import Wallet from "../models/Wallet.js";
+import { generateMockAddress } from "../utils/wallet.js";
 
-// @desc    Get all cryptocurrencies
-// @route   GET /api/crypto
-exports.getAllCryptos = async (req, res, next) => {
+const SEEDED = { createdBy: null };
+
+const getAllCrypto = async (_req, res) => {
   try {
-    const cryptos = await Crypto.find().sort({ name: 1 });
-    
-    res.json({
-      status: 'success',
-      results: cryptos.length,
-      data: cryptos
-    });
-  } catch (error) {
-    next(error);
+    const coins = await Crypto.find(SEEDED).sort({ createdAt: -1 });
+    res.json({ coins });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
-// @desc    Get top gainers (positive change24h)
-// @route   GET /api/crypto/gainers
-exports.getGainers = async (req, res, next) => {
+const getGainers = async (_req, res) => {
   try {
-    const gainers = await Crypto.find({ change24h: { $gt: 0 } })
-      .sort({ change24h: -1 }) // Highest gainers first
-      .limit(20);
-    
-    res.json({
-      status: 'success',
-      results: gainers.length,
-      data: gainers
+    const coins = await Crypto.find({ ...SEEDED, change24h: { $gt: 0 } }).sort({
+      change24h: -1,
     });
-  } catch (error) {
-    next(error);
+    res.json({ coins });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
-// @desc    Get new listings
-// @route   GET /api/crypto/new
-exports.getNewListings = async (req, res, next) => {
+const getNewListings = async (_req, res) => {
   try {
-    const newCryptos = await Crypto.find()
-      .sort({ listedAt: -1, createdAt: -1 }) // Newest first
-      .limit(10);
-    
-    res.json({
-      status: 'success',
-      results: newCryptos.length,
-      data: newCryptos
-    });
-  } catch (error) {
-    next(error);
+    const coins = await Crypto.find(SEEDED).sort({ createdAt: -1 }).limit(20);
+    res.json({ coins });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
-// @desc    Create new cryptocurrency (admin only for assignment)
-// @route   POST /api/crypto
-exports.createCrypto = async (req, res, next) => {
+const addCrypto = async (req, res) => {
   try {
-    const crypto = await Crypto.create(req.body);
-    
-    res.status(201).json({
-      status: 'success',
-      data: crypto
-    });
-  } catch (error) {
-    // Handle duplicate symbol error
-    if (error.code === 11000) {
-      return next(new ApiError(400, 'Cryptocurrency symbol already exists'));
+    const { name, symbol, price, image, change24h } = req.body;
+    const userId = req.user._id;
+    const symbolUp = symbol.toUpperCase();
+
+    // Block if the user already has a wallet for this symbol (seeded or custom)
+    const userAlreadyHas = await Wallet.findOne({ userId, asset: symbolUp });
+    if (userAlreadyHas) {
+      return res
+        .status(409)
+        .json({ message: `You already have a ${symbolUp} wallet` });
     }
-    next(error);
+
+    // Create (or reuse) the Crypto market entry scoped to this user
+    let coin = await Crypto.findOne({ symbol: symbolUp, createdBy: userId });
+    if (!coin) {
+      coin = await Crypto.create({
+        name,
+        symbol: symbolUp,
+        price,
+        image,
+        change24h,
+        createdBy: userId,
+      });
+    }
+
+    // Create a zero-balance custom wallet ONLY for this user
+    await Wallet.create({
+      userId,
+      asset: symbolUp,
+      balance: 0,
+      address: generateMockAddress(symbolUp),
+      isCustom: true,
+    });
+
+    res
+      .status(201)
+      .json({ message: "Cryptocurrency added to your wallet", coin });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
+
+export { getAllCrypto, getGainers, getNewListings, addCrypto };

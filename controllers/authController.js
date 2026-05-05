@@ -1,134 +1,233 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const ApiError = require('../utils/apiError');
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import User from "../models/User.js";
+import RefreshToken from "../models/RefreshToken.js";
 
-// Helper: Generate JWT token
-const signToken = (userId) => {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: '7d' // Token expires in 7 days
-  });
-};
+const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
-// @desc    Register new user
-// @route   POST /api/auth/register
-exports.register = async (req, res, next) => {
+// REGISTER
+export const registerUser = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // 1. Validate input
-    if (!name || !email || !password) {
-      return next(new ApiError(400, 'Please provide name, email and password'));
-    }
-
-    // 2. Check if user exists
+    // Check if user exists
     const existingUser = await User.findOne({ email });
+
     if (existingUser) {
-      return next(new ApiError(400, 'Email already registered'));
+      return res.status(400).json({
+        message: "User already exists",
+      });
     }
 
-    // 3. Create user (password will be hashed by schema middleware)
-    const newUser = await User.create({ name, email, password });
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const otp = generateOtp();
 
-    // 4. Generate token
-    const token = signToken(newUser._id);
-
-    // 5. Set cookie (HTTP-only, secure in production)
-    res.cookie('jwt', token, {
-  httpOnly: true,
-  secure: true, // Must be true for HTTPS (Render uses HTTPS)
-  sameSite: 'none', // Required for cross-origin cookies
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/' // Make cookie available everywhere
-});
-
-    // 6. Send response (exclude password)
-    res.status(201).json({
-      status: 'success',
-      data: {
-        user: {
-          id: newUser._id,
-          name: newUser.name,
-          email: newUser.email
-        }
-      }
+    // Create user with a demo verification code
+    const user = await User.create({
+      name,
+      email,
+      passwordHash: hashedPassword,
+      emailOtp: otp,
+      emailOtpExpires: new Date(Date.now() + 15 * 60 * 1000),
+      isEmailVerified: false,
     });
 
+    res.status(201).json({
+      message: "Registration successful. Verification code generated.",
+      userId: user._id,
+      devOtp: otp,
+    });
   } catch (error) {
-    next(error);
+    res.status(500).json({
+      message: error.message,
+    });
   }
 };
 
-// @desc    Login user
-// @route   POST /api/auth/login
-exports.login = async (req, res, next) => {
+// LOGIN
+export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Validate input
-    if (!email || !password) {
-      return next(new ApiError(400, 'Please provide email and password'));
+    // Find user
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
     }
 
-    // 2. Find user + include password (select: false in schema)
-    const user = await User.findOne({ email }).select('+password');
-    
-    // 3. Check if user exists and password matches
-    if (!user || !(await user.comparePassword(password))) {
-      return next(new ApiError(401, 'Invalid email or password'));
+    if (!user.isEmailVerified) {
+      return res.status(403).json({
+        message: "Please verify your email before logging in.",
+      });
     }
 
-    // 4. Generate token
-    const token = signToken(user._id);
+    // Compare password
+    const isMatch = await user.matchPassword(password);
 
-    // 5. Set cookie
-    res.cookie('jwt', token, {
+    if (!isMatch) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    // Generate JWT
+    const accessToken = jwt.sign(
+      { id: user._id },
+      process.env.JWT_ACCESS_SECRET,
+      {
+        expiresIn: process.env.JWT_ACCESS_EXPIRES,
+      },
+    );
+    const refreshToken = jwt.sign(
+      { id: user._id },
+      process.env.JWT_REFRESH_SECRET,
+      {
+        expiresIn: process.env.JWT_REFRESH_EXPIRES,
+      },
+    );
+
+    // Save refresh token document with required fields
+    await RefreshToken.create({
+      userId: user._id,
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    // Set refresh token in httpOnly cookie
+    res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    // 6. Send response
-    res.json({
-      status: 'success',
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email
-        }
-      }
+    res.status(200).json({
+      message: "Login successful",
+      accessToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      },
     });
-
   } catch (error) {
-    next(error);
+    res.status(500).json({
+      message: error.message,
+    });
   }
 };
 
-// @desc    Get current user profile
-// @route   GET /api/auth/profile
-// @access  Protected
-exports.getProfile = async (req, res) => {
-  // req.user is set by auth middleware
-  res.json({
-    status: 'success',
-    data: {
-      user: {
-        id: req.user._id,
-        name: req.user.name,
-        email: req.user.email,
-        createdAt: req.user.createdAt
-      }
+// VERIFY EMAIL OTP
+export const verifyEmail = async (req, res) => {
+  try {
+    const { userId, otp } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "Missing userId" });
     }
-  });
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(200).json({ message: "Email already verified" });
+    }
+
+    if (!user.emailOtp || user.emailOtp !== otp) {
+      return res.status(422).json({ message: "Invalid verification code" });
+    }
+
+    if (!user.emailOtpExpires || user.emailOtpExpires < new Date()) {
+      return res.status(422).json({ message: "Verification code expired" });
+    }
+
+    user.isEmailVerified = true;
+    user.emailOtp = undefined;
+    user.emailOtpExpires = undefined;
+    await user.save();
+
+    res.status(200).json({ message: "Email verified successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 };
 
-// @desc    Logout user (clear cookie)
-// @route   POST /api/auth/logout
-exports.logout = (req, res) => {
-  res.cookie('jwt', 'loggedout', {
-    httpOnly: true,
-    expires: new Date(Date.now() + 10 * 1000) // Expires in 10 seconds
-  });
-  res.json({ status: 'success', message: 'Logged out successfully' });
-}
+// RESEND EMAIL OTP
+export const resendOtp = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "Missing userId" });
+    }
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: "Email already verified" });
+    }
+
+    const otp = generateOtp();
+    user.emailOtp = otp;
+    user.emailOtpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await user.save();
+
+    res.status(200).json({ message: "Verification code resent", devOtp: otp });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// REFRESH TOKEN
+export const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.cookies;
+
+    if (!refreshToken) {
+      return res.status(401).json({ message: "Refresh token not found" });
+    }
+
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+
+    // Check if refresh token exists in DB
+    const storedToken = await RefreshToken.findOne({ token: refreshToken });
+    if (!storedToken) {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    // Generate new access token
+    const accessToken = jwt.sign(
+      { id: decoded.id },
+      process.env.JWT_ACCESS_SECRET,
+      {
+        expiresIn: process.env.JWT_ACCESS_EXPIRES,
+      },
+    );
+
+    res.json({ accessToken });
+  } catch (error) {
+    res.status(401).json({ message: "Invalid refresh token" });
+  }
+};
+
+// LOGOUT
+export const logoutUser = async (req, res) => {
+  try {
+    const { refreshToken } = req.cookies;
+    if (refreshToken) {
+      await RefreshToken.findOneAndDelete({ token: refreshToken });
+    }
+    res.clearCookie("refreshToken");
+    res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

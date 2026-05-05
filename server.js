@@ -1,85 +1,66 @@
-require('dotenv').config();
-const cron = require('node-cron');
-const { fetchAndUpdatePrices } = require('./services/coinGeckoService');
-const express = require('express');
-const mongoose = require('mongoose');
-const cookieParser = require('cookie-parser');
-const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+import express from "express";
+import dotenv from "dotenv";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import mongoose from "mongoose";
+import authRoutes from "./routes/authRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import cryptoRoutes from "./routes/cryptoRoutes.js";
+import { seedCrypto } from "./utils/seedCrypto.js";
 
-// Import routes
-const authRoutes = require('./routes/authRoutes');
-const cryptoRoutes = require('./routes/cryptoRoutes');
-
-// Import utils
-const connectDB = require('./config/db');
-const ApiError = require('./utils/apiError');
+dotenv.config();
 
 const app = express();
 
-// 🔧 TRUST PROXY: Required for Render
-app.set('trust proxy', true);
+const normalizeOrigin = (origin) => origin?.trim().replace(/\/$/, "");
+const allowedOrigins = (
+  process.env.FRONTEND_URL || "http://localhost:5173"
+)
+  .split(",")
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
-// 🔒 Security middleware
-app.use(helmet());
-app.use(cors({
-  origin: ['http://localhost:5173', 'https://coinbaseboyrex7.netlify.app', 'https://*.netlify.app'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['set-cookie']
-}));
-
-
-// 📦 Body parsing middleware
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+// Middleware
+app.use(express.json());
 app.use(cookieParser());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      const normalized = normalizeOrigin(origin);
+      if (!origin || allowedOrigins.includes(normalized)) {
+        callback(null, origin || true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
+    credentials: true,
+  }),
+);
 
-// 🗄️ Connect to MongoDB
-connectDB();
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/crypto", cryptoRoutes);
 
-// 🔄 LIVE PRICE UPDATES: Fetch on startup + every 60 seconds
-console.log('⏰ Initializing live price updates...');
-fetchAndUpdatePrices(); // Run immediately on startup
-
-cron.schedule('*/3 * * * *', () => {
-  console.log('⏰ Running scheduled price update...');
-  fetchAndUpdatePrices();
+// Test routes
+app.get("/", (req, res) => {
+  res.send("API is running...");
 });
-// 🛣️ Mount routes
-app.use('/api/auth', authRoutes);
-app.use('/api/crypto', cryptoRoutes);
-
-// 🏥 Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Backend is running' });
-});
-
-// ❌ 404 handler
-app.all('*', (req, res, next) => {
-  next(new ApiError(404, `Route ${req.originalUrl} not found`));
-});
-
-// 🌍 Global error handler
-app.use((err, req, res, next) => {
-  err.statusCode = err.statusCode || 500;
-  err.status = err.status || 'error';
-
-  if (process.env.NODE_ENV === 'development') {
-    console.error('❌ Error:', err);
-  }
-
-  res.status(err.statusCode).json({
-    status: err.status,
-    message: err.message || 'Internal server error'
-  });
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok" });
 });
 
-// 🎧 Start server
+// Start server
 const PORT = process.env.PORT || 5000;
+
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(async () => {
+    console.log("MongoDB connected ✅");
+    await seedCrypto();
+  })
+  .catch((err) => console.log(err));
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV}`);
+  console.log(`Server running on port ${PORT}`);
 });

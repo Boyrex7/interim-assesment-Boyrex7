@@ -1,21 +1,45 @@
-const express = require('express');
-const { 
-  getAllCryptos, 
-  getGainers, 
-  getNewListings, 
-  createCrypto 
-} = require('../controllers/cryptoController');
-const { manualUpdate } = require('../controllers/priceControllers');
+import express from "express";
+import { body } from "express-validator";
+import { validate } from "../middleware/validate.middleware.js";
+import { protect } from "../middleware/auth.middleware.js";
+import {
+  getAllCrypto,
+  getGainers,
+  getNewListings,
+  addCrypto,
+} from "../controllers/cryptoController.js";
 
 const router = express.Router();
 
-// Public routes (for assignment scope)
-router.get('/', getAllCryptos);
-router.post('/update-prices', manualUpdate);
-router.get('/gainers', getGainers);
-router.get('/new', getNewListings);
+router.get("/", getAllCrypto);
+router.get("/gainers", getGainers);
+router.get("/new", getNewListings);
 
-// Create crypto (in production, add admin middleware here)
-router.post('/', createCrypto);
+router.post(
+  "/",
+  protect,
+  [
+    body("name").trim().notEmpty().withMessage("Name is required"),
+    body("symbol").trim().notEmpty().withMessage("Symbol is required"),
+    body("price")
+      .isFloat({ gt: 0 })
+      .withMessage("Price must be a positive number"),
+    body("image")
+      .optional()
+      .custom((val) => {
+        if (val && !/^(https?:\/\/.+|data:image\/.+)/.test(val))
+          throw new Error(
+            "Image must be a valid URL (http/https) or a data: URI",
+          );
+        return true;
+      }),
+    body("change24h")
+      .optional()
+      .isFloat()
+      .withMessage("change24h must be a number"),
+  ],
+  validate,
+  addCrypto,
+);
 
-module.exports = router;
+export default router;
